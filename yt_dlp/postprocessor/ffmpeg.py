@@ -10,6 +10,7 @@ import json
 
 from .common import AudioConversionError, PostProcessor
 
+from ..compat import compat_str
 from ..utils import (
     encodeArgument,
     encodeFilename,
@@ -769,3 +770,46 @@ class FFmpegSubtitlesConvertorPP(FFmpegPostProcessor):
                 }
 
         return sub_filenames, info
+
+
+class FFmpegSplitChaptersPP(FFmpegPostProcessor):
+
+    def _prepare_filename(self, idx, chapter, info):
+        info = info.copy()
+        info.update({
+            'part_number': idx + 1,
+            'part_title': chapter.get('title'),
+            'part_start': chapter.get('start_time'),
+            'part_end': chapter.get('end_time'),
+        })
+        return self._downloader.prepare_filename(info, 'split')
+
+    def _ffmpeg_args_for_chapter(self, idx, chapter, info):
+        destination = self._prepare_filename(idx, chapter, info)
+        if not self._downloader._ensure_dir_exists(encodeFilename(destination)):
+            return
+
+        chapter['_filename'] = destination
+        self.to_screen('Chapter %03d; Destination: %s' % (idx, destination))
+        return (
+            destination,
+            [
+                # TODO: Make -c copy work correctly
+                # '-c', 'copy',
+                # '-avoid_negative_ts', '1',
+                # '-async', '1', '-strict', '-2',
+                '-ss', compat_str(chapter['start_time']),
+                '-to', compat_str(chapter['end_time']),
+            ])
+
+    def run(self, info):
+        chapters = info.get('chapters') or []
+        if not chapters:
+            self.report_warning('There are no tracks to extract')
+            return [], info
+
+        self.to_screen('Splitting video by chapters; %d chapters found' % len(chapters))
+        self.run_ffmpeg_multiple_outputs(
+            [(info['filepath'], ['-accurate_seek'])],
+            [self._ffmpeg_args_for_chapter(idx, chapter, info) for idx, chapter in enumerate(chapters)])
+        return [], info

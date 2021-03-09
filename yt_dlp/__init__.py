@@ -369,11 +369,7 @@ def _real_main(argv=None):
         })
         if not already_have_thumbnail:
             opts.writethumbnail = True
-    # XAttrMetadataPP should be run after post-processors that may change file
-    # contents
-    if opts.xattrs:
-        postprocessors.append({'key': 'XAttrMetadata'})
-    # This should be below all ffmpeg PP because it may cut parts out from the video
+    # This should be below most ffmpeg PP because it may cut parts out from the video
     # If opts.sponskrub is None, sponskrub is used, but it silently fails if the executable can't be found
     if opts.sponskrub is not False:
         postprocessors.append({
@@ -384,6 +380,11 @@ def _real_main(argv=None):
             'force': opts.sponskrub_force,
             'ignoreerror': opts.sponskrub is None,
         })
+    if opts.split_chapters:
+        postprocessors.append({'key': 'FFmpegSplitChapters'})
+    # XAttrMetadataPP should be run after post-processors that may change file contents
+    if opts.xattrs:
+        postprocessors.append({'key': 'XAttrMetadata'})
     # ExecAfterDownload must be the last PP
     if opts.exec_cmd:
         postprocessors.append({
