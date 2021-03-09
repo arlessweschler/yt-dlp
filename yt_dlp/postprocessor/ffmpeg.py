@@ -234,10 +234,15 @@ class FFmpegPostProcessor(PostProcessor):
         return num, len(streams)
 
     def run_ffmpeg_multiple_files(self, input_paths, out_path, opts):
+        return self.run_ffmpeg_multiple_outputs(
+            [(path, []) for path in input_paths],
+            [(out_path, opts)])
+
+    def run_ffmpeg_multiple_outputs(self, input_path_opts, output_path_opts):
         self.check_version()
 
         oldest_mtime = min(
-            os.stat(encodeFilename(path)).st_mtime for path in input_paths)
+            os.stat(encodeFilename(path)).st_mtime for path, _ in input_path_opts)
 
         cmd = [encodeFilename(self.executable, True), encodeArgument('-y')]
         # avconv does not have repeat option
@@ -245,14 +250,19 @@ class FFmpegPostProcessor(PostProcessor):
             cmd += [encodeArgument('-loglevel'), encodeArgument('repeat+info')]
 
         def make_args(file, pre=[], post=[], *args, **kwargs):
-            args = pre + self._configuration_args(*args, **kwargs) + post
+            args = pre + self._configuration_args(use_default_arg=False, *args, **kwargs) + post
             return (
                 [encodeArgument(o) for o in args]
                 + [encodeFilename(self._ffmpeg_filename_argument(file), True)])
 
-        for i, path in enumerate(input_paths):
-            cmd += make_args(path, post=['-i'], exe='%s_i%d' % (self.basename, i + 1), use_default_arg=False)
-        cmd += make_args(out_path, pre=opts, exe=self.basename)
+        for argtype, options in (('i', input_path_opts), ('o', output_path_opts)):
+            if argtype == 'o':
+                cmd += self._configuration_args(exe=self.basename)
+            for i, path_opts in enumerate(options):
+                path, opts = path_opts
+                cmd += make_args(
+                    path, pre=opts, post=(['-i'] if argtype == 'i' else []),
+                    exe='%s_%s%d' % (self.basename, argtype, i + 1))
 
         self.write_debug('ffmpeg command line: %s' % shell_quote(cmd))
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
@@ -262,7 +272,8 @@ class FFmpegPostProcessor(PostProcessor):
             if self.get_param('verbose', False):
                 self.report_error(stderr)
             raise FFmpegPostProcessorError(stderr.split('\n')[-1])
-        self.try_utime(out_path, oldest_mtime, oldest_mtime)
+        for out_path, _ in output_path_opts:
+            self.try_utime(out_path, oldest_mtime, oldest_mtime)
         return stderr.decode('utf-8', 'replace')
 
     def run_ffmpeg(self, path, out_path, opts):
